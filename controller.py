@@ -42,16 +42,19 @@ SERIAL_BAUD = int(os.getenv("SERIAL_BAUD", "115200"))
 MODEL_NAME = "gemini-robotics-er-1.6-preview"
 GEMINI_TIMEOUT_MS = 15_000
 
-BELT_LENGTH_CM = 77.0
-SPEED_TEST_DISTANCE_CM = 77.0
-SPEED_TEST_TIME_S = 5.5925
+# Physical calibration; override in .env when the mechanics change.
+BELT_LENGTH_CM = float(os.getenv("BELT_LENGTH_CM", "77.0"))
+SPEED_TEST_DISTANCE_CM = float(os.getenv("SPEED_TEST_DISTANCE_CM", "77.0"))
+SPEED_TEST_TIME_S = float(os.getenv("SPEED_TEST_TIME_S", "5.5925"))
 BELT_SPEED_CM_S = SPEED_TEST_DISTANCE_CM / SPEED_TEST_TIME_S
-TARGET_TOLERANCE_CM = 4.0
+TARGET_TOLERANCE_CM = float(os.getenv("TARGET_TOLERANCE_CM", "4.0"))
 MOVE_GAIN = 0.8
 MIN_MOVE_MS = 80
-MAX_MOVE_MS = 1500
-NEAR_TARGET_CM = 8.0
-NEAR_TARGET_MAX_MS = 180
+MAX_MOVE_MS = int(os.getenv("MAX_MOVE_MS", "1500"))
+NEAR_TARGET_CM = float(os.getenv("NEAR_TARGET_CM", "8.0"))
+NEAR_TARGET_MAX_MS = int(os.getenv("NEAR_TARGET_MAX_MS", "180"))
+# Optional description of the tracked object, e.g. the carriage of a linear axis.
+TARGET_HINT = os.getenv("TARGET_HINT", "").strip()
 DEFAULT_LEFT_X = 200
 DEFAULT_CENTER_X = 500
 DEFAULT_RIGHT_X = 800
@@ -349,6 +352,7 @@ def build_prompt(
             f"ACTIVE WAYPOINT INDEX: {active_waypoint_index}. Return this exact sequence "
             "and index; do not restart, reorder, add, remove, or reinterpret waypoints."
         )
+    setup_note = f"\nSETUP NOTE: {TARGET_HINT}" if TARGET_HINT else ""
     return f"""
 You are the high-level Vision-Language-Action controller of a reversible conveyor.
 
@@ -359,7 +363,7 @@ Inspect the supplied calibrated overhead conveyor image. Identify only one loose
 movable object resting on the exposed conveyor surface whose appearance matches the
 active operator instruction. Do not substitute another loose object. Ignore belt
 slats, rails, markers, structures, motors, wires, electronics, people, tables, and
-background.
+background.{setup_note}
 
 Interpret the instruction as one object plus one or more ordered destination
 positions along the conveyor x-axis. The operator writes unrestricted natural

@@ -1,19 +1,18 @@
 #include "global.h"
-#include "dc_motor.h"
-#include "button.h"
+#include "stepper_motor.h"
+#include "driver/gpio.h"
 
 namespace {
 // Đổi thành false nếu lệnh RIGHT làm vật chạy sang trái.
 constexpr bool IMAGE_RIGHT_IS_FORWARD = false;
 
 constexpr uint32_t MIN_DURATION_MS = 50;
-constexpr uint32_t MAX_DURATION_MS = 3000;
+constexpr uint32_t MAX_DURATION_MS = 10000;
 
 bool motorRunning = false;
-uint32_t stopAtMs = 0;
 
 void stopMotor() {
-    motor_state = MOTOR_STOP;
+    stepper_stop();
     motorRunning = false;
 }
 
@@ -22,8 +21,8 @@ void startMove(bool moveRight, uint32_t durationMs) {
         ? IMAGE_RIGHT_IS_FORWARD
         : !IMAGE_RIGHT_IS_FORWARD;
 
-    motor_state = forward ? MOTOR_FORWARD : MOTOR_BACKWARD;
-    stopAtMs = millis() + durationMs;
+    stepper_stop();
+    stepper_start(forward, durationMs);
     motorRunning = true;
 }
 
@@ -38,6 +37,35 @@ void handleCommand(String command) {
     if (command == "STOP") {
         stopMotor();
         Serial.println("STOPPED");
+        return;
+    }
+
+    if (command == "PINTEST") {
+        // Holds STEP (D2) and DIR (D3) HIGH for a multimeter check.
+        stopMotor();
+        // INPUT_OUTPUT lets the pad level be read back: LOW means an external
+        // short/load is pulling the pin down.
+        gpio_set_direction(static_cast<gpio_num_t>(STEPPER_STEP_GPIO), GPIO_MODE_INPUT_OUTPUT);
+        gpio_set_direction(static_cast<gpio_num_t>(STEPPER_DIR_GPIO), GPIO_MODE_INPUT_OUTPUT);
+        digitalWrite(STEPPER_STEP_GPIO, HIGH);
+        digitalWrite(STEPPER_DIR_GPIO, HIGH);
+        Serial.println("PINTEST,HIGH");
+        delay(50);
+        Serial.printf(
+            "PINTEST,READBACK,STEP=%d,DIR=%d,EN=%d\n",
+            gpio_get_level(static_cast<gpio_num_t>(STEPPER_STEP_GPIO)),
+            gpio_get_level(static_cast<gpio_num_t>(STEPPER_DIR_GPIO)),
+            digitalRead(STEPPER_EN_GPIO)
+        );
+        delay(30000);
+        digitalWrite(STEPPER_STEP_GPIO, LOW);
+        digitalWrite(STEPPER_DIR_GPIO, LOW);
+        Serial.println("PINTEST,LOW");
+        return;
+    }
+
+    if (command == "POS") {
+        Serial.printf("POS,%ld\n", static_cast<long>(stepper_position()));
         return;
     }
 
@@ -80,16 +108,18 @@ void setup() {
     Serial.setTimeout(40);
     delay(1000);
 
-    xTaskCreate(
-        task_motor,
-        "motor",
-        2048,
+    stepper_init();
+    // The stepper task busy-waits on core 0 at idle priority, so the idle task
+    // (configIDLE_SHOULD_YIELD) still feeds the watchdog; loop() stays on core 1.
+    xTaskCreatePinnedToCore(
+        task_stepper,
+        "stepper",
+        4096,
         nullptr,
-        2,
-        nullptr
+        tskIDLE_PRIORITY,
+        nullptr,
+        0
     );
-
-    xTaskCreate(task_button, "button",2048,nullptr,2,nullptr);
 
     Serial.println("READY");
 }
@@ -97,9 +127,9 @@ void setup() {
 void loop() {
     if (
         motorRunning
-        && static_cast<int32_t>(millis() - stopAtMs) >= 0
+        && !stepper_is_running()
     ) {
-        stopMotor();
+        motorRunning = false;
         Serial.println("DONE");
     }
 
